@@ -23,4 +23,6 @@ func init() {
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(logCmd)
 	rootCmd.AddCommand(doneCmd)
+	rootCmd.AddCommand(inboxCmd)
+	rootCmd.AddCommand(outboxCmd)
 }

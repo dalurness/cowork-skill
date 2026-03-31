@@ -81,6 +81,22 @@ Exit. The binary will fire workers against the seeded queue.
 
 ### Standard Sequence (subsequent runs)
 
+### Phase 0 — Check inbox
+
+Run `cowork inbox list --project <project-root>`.
+
+If the inbox is not empty:
+- Read each listed file in full.
+- For each item that is a **comment or directive** (feedback, instruction, request to create tasks):
+  - Act on it: create tasks (`cowork task create` + `cowork queue add`), update plans, etc.
+  - Then run: `cowork inbox handle <path> --project <project-root>`
+- For each item that is a **question** (asking for status, clarification, or information):
+  - Formulate a concise answer.
+  - Run: `cowork inbox respond <path> "<answer>" --project <project-root>`
+- Log what was processed in the run log (note it in the Phase 6 updates entry).
+
+If the inbox is empty, proceed to Phase 1 immediately.
+
 ### Phase 1 — Load context
 Read: `OVERVIEW.md`, `plan/OVERVIEW.md` (if exists), recent `updates/` entries,
 and the most recent JSON log in `log/` to understand what ran last.
