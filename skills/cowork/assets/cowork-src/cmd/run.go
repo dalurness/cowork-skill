@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -35,6 +36,8 @@ func init() {
 	runCmd.Flags().String("only", "", "Bypass scheduling and run one step directly: orchestrator|pm|architect|worker")
 	runCmd.Flags().String("task", "", "Task ID for --only worker (e.g. TASK-004)")
 	runCmd.Flags().String("worker-cmd", "", "Mock worker command for testing (empty = use real claude)")
+	runCmd.Flags().Duration("script-timeout", 30*time.Minute, "Max time for each orchestrator, PM, or architect session")
+	runCmd.Flags().String("script-cmd", "", "Mock script command for testing (empty = use real claude)")
 }
 
 func runMain(cmd *cobra.Command, args []string) error {
@@ -351,8 +354,40 @@ func runOrchestrator(ctx context.Context, cmd *cobra.Command, projectDir string)
 }
 
 // runScriptSession reads a script from the skill scripts/ dir and pipes it to claude.
-// The claude process is bound to ctx — if ctx is cancelled, the process is killed.
+// Each call gets its own child context capped at --script-timeout (or the remaining
+// overall timeout, whichever is shorter).  If --script-cmd is set, that command is
+// used instead of the real claude invocation — useful for tests.
 func runScriptSession(ctx context.Context, cmd *cobra.Command, projectDir, scriptName string) error {
+	// Per-session timeout: each script run is independently capped.
+	scriptTimeout, _ := cmd.Flags().GetDuration("script-timeout")
+	sessionCtx, cancel := context.WithTimeout(ctx, scriptTimeout)
+	defer cancel()
+
+	// --script-cmd: if set, skip real claude and run the mock command instead.
+	scriptCmdOverride, _ := cmd.Flags().GetString("script-cmd")
+	if scriptCmdOverride != "" {
+		c := exec.CommandContext(sessionCtx, scriptCmdOverride)
+		c.Dir = projectDir
+		c.Stdout = os.Stdout
+		c.Stderr = os.Stderr
+		// Run in its own process group so that killing c also kills any
+		// grandchildren (e.g. "sleep 3600" spawned by mock shell scripts).
+		// Without this, orphaned grandchildren keep the stdout pipe open and
+		// cmd.Wait() in the test helper hangs forever.
+		c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		c.Cancel = func() error {
+			if c.Process == nil {
+				return nil
+			}
+			// Negative pid kills the whole process group.
+			return syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+		}
+		c.WaitDelay = 3 * time.Second
+		return c.Run()
+	}
+
+	// --- Real claude path (unchanged behaviour when --script-cmd is empty) ---
+
 	skillDir, _ := cmd.Flags().GetString("skill-dir")
 	if skillDir == "" {
 		return fmt.Errorf("--skill-dir is required for script injection")
@@ -403,8 +438,8 @@ func runScriptSession(ctx context.Context, cmd *cobra.Command, projectDir, scrip
 	// Build the prompt: CLI reference preamble + role script
 	prompt := cliRef + script
 
-	// Run claude session — bound to ctx for clean cancellation
-	c := exec.CommandContext(ctx, "claude", "--dangerously-skip-permissions", "-p", prompt)
+	// Run claude session — bound to sessionCtx for clean cancellation
+	c := exec.CommandContext(sessionCtx, "claude", "--dangerously-skip-permissions", "-p", prompt)
 	c.Dir = projectDir
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr

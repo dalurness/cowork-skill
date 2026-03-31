@@ -388,6 +388,113 @@ func TestContextTimeout_HardKill(t *testing.T) {
 	}
 }
 
+// --------------------------------------------------------------------
+// Script-session timeout tests
+// --------------------------------------------------------------------
+
+// TestOrchestratorTimeout verifies that --script-timeout kills a hanging
+// orchestrator session and the binary exits non-zero well before the mock
+// script would have finished.
+func TestOrchestratorTimeout(t *testing.T) {
+	dir := t.TempDir()
+	setupProject(t, dir, nil)
+
+	start := time.Now()
+	exitCode, output := runCowork(t, 12*time.Second,
+		"run",
+		"--project", dir,
+		"--only", "orchestrator",
+		"--script-timeout", "3s",
+		"--script-cmd", scriptPath("mock-script-hang.sh"),
+	)
+	elapsed := time.Since(start)
+
+	// Should exit non-zero (script was killed by timeout)
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit (timeout), got 0\noutput: %s", output)
+	}
+
+	// Should have exited well before the hang script's 3600s sleep
+	if elapsed > 8*time.Second {
+		t.Errorf("expected exit within 8s, took %v\noutput: %s", elapsed, output)
+	}
+}
+
+// TestPMTimeout verifies that --script-timeout kills a hanging PM session.
+func TestPMTimeout(t *testing.T) {
+	dir := t.TempDir()
+	setupProject(t, dir, nil)
+
+	start := time.Now()
+	exitCode, output := runCowork(t, 12*time.Second,
+		"run",
+		"--project", dir,
+		"--only", "pm",
+		"--script-timeout", "3s",
+		"--script-cmd", scriptPath("mock-script-hang.sh"),
+	)
+	elapsed := time.Since(start)
+
+	// Should exit non-zero (script was killed by timeout)
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit (timeout), got 0\noutput: %s", output)
+	}
+
+	// Should have exited well before the hang script's 3600s sleep
+	if elapsed > 8*time.Second {
+		t.Errorf("expected exit within 8s, took %v\noutput: %s", elapsed, output)
+	}
+}
+
+// TestScriptSessionCompletesNormally verifies that a --script-cmd that exits 0
+// causes runScriptSession to return nil and the binary to exit 0.
+func TestScriptSessionCompletesNormally(t *testing.T) {
+	dir := t.TempDir()
+	setupProject(t, dir, nil)
+
+	exitCode, output := runCowork(t, 15*time.Second,
+		"run",
+		"--project", dir,
+		"--only", "orchestrator",
+		"--script-timeout", "30s",
+		"--script-cmd", scriptPath("mock-script-success.sh"),
+	)
+
+	if exitCode != 0 {
+		t.Errorf("expected exit 0 (success), got %d\noutput: %s", exitCode, output)
+	}
+}
+
+// TestScriptTimeoutDoesNotExceedOverallTimeout verifies that the overall
+// --timeout wins over --script-timeout when the overall deadline is shorter.
+// The script-timeout is 60s but the overall timeout is 10s; the script should
+// be killed at ~10s.
+func TestScriptTimeoutDoesNotExceedOverallTimeout(t *testing.T) {
+	dir := t.TempDir()
+	setupProject(t, dir, nil)
+
+	start := time.Now()
+	exitCode, output := runCowork(t, 20*time.Second,
+		"run",
+		"--project", dir,
+		"--only", "orchestrator",
+		"--timeout", "10s",
+		"--script-timeout", "60s",
+		"--script-cmd", scriptPath("mock-script-hang.sh"),
+	)
+	elapsed := time.Since(start)
+
+	// Should exit non-zero (killed by overall timeout)
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit (timeout), got 0\noutput: %s", output)
+	}
+
+	// Overall timeout is 10s — must exit well before the 60s script-timeout
+	if elapsed > 12*time.Second {
+		t.Errorf("expected exit within 12s (overall timeout), took %v\noutput: %s", elapsed, output)
+	}
+}
+
 // TestDrainWindow verifies that --forever stops launching new cycles when
 // there is less time remaining than the drain window.
 func TestDrainWindow(t *testing.T) {
