@@ -30,7 +30,7 @@ func init() {
 	runCmd.Flags().Int("pm-every", 5, "Run PM pass every N runs")
 	runCmd.Flags().Int("architect-every", 10, "Run architect pass every N runs")
 	runCmd.Flags().String("skill-dir", "", "Path to skill directory (for scripts/)")
-	runCmd.Flags().String("drain-window", "10m", "Deprecated: no longer used")
+	runCmd.Flags().Duration("drain-window", 15*time.Minute, "Stop launching new cycles this long before the overall timeout deadline")
 	runCmd.Flags().Duration("poll-interval", 10*time.Minute, "Polling interval for forever mode")
 	runCmd.Flags().String("only", "", "Bypass scheduling and run one step directly: orchestrator|pm|architect|worker")
 	runCmd.Flags().String("task", "", "Task ID for --only worker (e.g. TASK-004)")
@@ -219,10 +219,10 @@ func runForever(ctx context.Context, cmd *cobra.Command, projectDir string) erro
 		}
 
 		// Stop if deadline is too close to fit another full cycle
-		// (use pollInterval as minimum headroom)
+		drainWindow, _ := cmd.Flags().GetDuration("drain-window")
 		if deadline, ok := ctx.Deadline(); ok {
 			remaining := time.Until(deadline)
-			if remaining < pollInterval+5*time.Minute {
+			if remaining < drainWindow {
 				fmt.Printf("Stopping: only %v until deadline — not enough time for another cycle\n",
 					remaining.Round(time.Second))
 				return nil

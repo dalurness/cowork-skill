@@ -100,8 +100,17 @@ Examples:
 		for _, d := range dirs {
 			fmt.Printf("  %s/\n", d)
 		}
-		fmt.Printf("\nTo start:\n")
-		fmt.Printf("  cowork run --project %s --skill-dir <skill-dir> --forever\n", projectDir)
+		fmt.Printf("\nNext steps:\n")
+		fmt.Printf("  1. Verify your agent CLI — workers default to 'claude'.\n")
+		fmt.Printf("     Edit cmd/workers.go if you're using codex, opencode, etc.\n")
+		fmt.Printf("\n  2. Schedule run crons (fires the worker/orchestrator loop):\n")
+		fmt.Printf("     timeout 3600 cowork run --project %s --skill-dir <skill-dir> --forever\n", projectDir)
+		fmt.Printf("\n  3. Schedule a question-check cron (recommended, every 2-3 hours):\n")
+		fmt.Printf("     Workers raise questions for blocking decisions — without a question-check\n")
+		fmt.Printf("     cron, questions may sit unnoticed until the next run cron fires.\n")
+		fmt.Printf("     See SKILL.md step 4 for the cron setup command.\n")
+		fmt.Printf("\n  4. Run manually to seed the first batch of tasks:\n")
+		fmt.Printf("     cowork run --project %s --skill-dir <skill-dir>\n", projectDir)
 
 		return nil
 	},
