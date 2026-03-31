@@ -34,6 +34,7 @@ func init() {
 	runCmd.Flags().Duration("poll-interval", 10*time.Minute, "Polling interval for forever mode")
 	runCmd.Flags().String("only", "", "Bypass scheduling and run one step directly: orchestrator|pm|architect|worker")
 	runCmd.Flags().String("task", "", "Task ID for --only worker (e.g. TASK-004)")
+	runCmd.Flags().String("worker-cmd", "", "Mock worker command for testing (empty = use real claude)")
 }
 
 func runMain(cmd *cobra.Command, args []string) error {

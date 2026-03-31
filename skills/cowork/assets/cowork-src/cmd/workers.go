@@ -62,6 +62,7 @@ func runWorkers(cmd *cobra.Command, projectDir string, ctx context.Context) (str
 	maxWorkers, _ := cmd.Flags().GetInt("workers")
 	queueFile, _ := cmd.Flags().GetString("queue")
 	workDir, _ := cmd.Flags().GetString("work-dir")
+	workerCmd, _ := cmd.Flags().GetString("worker-cmd")
 
 	if queueFile == "" {
 		queueFile = filepath.Join(projectDir, "queue", "todo.md")
@@ -70,10 +71,14 @@ func runWorkers(cmd *cobra.Command, projectDir string, ctx context.Context) (str
 		workDir = filepath.Join(projectDir, "work")
 	}
 
-	// Build constructor prompt
-	constructorPrompt, err := buildConstructorPrompt(skillDir, projectDir)
-	if err != nil {
-		return "", fmt.Errorf("building constructor prompt: %w", err)
+	// Build constructor prompt only when using real claude (not a mock command)
+	var constructorPrompt string
+	if workerCmd == "" {
+		var err error
+		constructorPrompt, err = buildConstructorPrompt(skillDir, projectDir)
+		if err != nil {
+			return "", fmt.Errorf("building constructor prompt: %w", err)
+		}
 	}
 
 	// Read task IDs from queue
@@ -150,8 +155,8 @@ func runWorkers(cmd *cobra.Command, projectDir string, ctx context.Context) (str
 			os.WriteFile(attemptsPath, []byte(fmt.Sprintf("%d\n", attempts)), 0o644)
 
 			outputPath := filepath.Join(taskDir, "OUTPUT.md")
-			if attempts >= 2 && !fileExists(outputPath) {
-				// Task has been attempted twice without producing OUTPUT.md → STUCK
+			if attempts >= 3 && !fileExists(outputPath) {
+				// Task has been attempted 3 times without producing OUTPUT.md → STUCK
 				stuckMsg := fmt.Sprintf("STUCK: %s attempted %d times without completing", tid, attempts)
 				fmt.Println(stuckMsg)
 
@@ -190,13 +195,20 @@ func runWorkers(cmd *cobra.Command, projectDir string, ctx context.Context) (str
 				return
 			}
 
-			prompt := constructorPrompt + "\n\n---\n\n" + string(briefData)
-
 			// ── Launch worker process ─────────────────────────────────────
 			// Worker gets its own process group for clean kill.
 			// NOTE: no --timeout flag is passed; the 1hr cap is enforced below.
-			c := exec.Command("claude", "--dangerously-skip-permissions", "-p", prompt)
+			var c *exec.Cmd
+			if workerCmd != "" {
+				// Mock command for testing — receives task dir as env var TASK_DIR.
+				// Working directory is set to taskDir so scripts can use $PWD.
+				c = exec.Command(workerCmd)
+			} else {
+				prompt := constructorPrompt + "\n\n---\n\n" + string(briefData)
+				c = exec.Command("claude", "--dangerously-skip-permissions", "-p", prompt)
+			}
 			c.Dir = taskDir
+			c.Env = append(os.Environ(), "TASK_DIR="+taskDir)
 			c.Stdout = os.Stdout
 			c.Stderr = os.Stderr
 			c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
