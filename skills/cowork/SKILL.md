@@ -36,12 +36,12 @@ cowork init --project ./my-project
 ```bash
 ID1=$(openclaw cron add --cron "0 10 * * *" \
   --name "my-project-4am" \
-  --message "timeout 3600 /path/to/cowork run --project /abs/path/to/my-project --skill-dir /abs/path/to/skill --forever" \
+  --message "nohup cowork run --project /abs/path/to/my-project --skill-dir /abs/path/to/skill --forever --timeout 1h > /tmp/my-project-cowork.log 2>&1 & disown && echo 'Launched'" \
   --session isolated --announce --to <your-chat-id> --json | jq -r '.id')
 
 ID2=$(openclaw cron add --cron "0 12 * * *" \
   --name "my-project-6am" \
-  --message "timeout 3600 /path/to/cowork run --project /abs/path/to/my-project --skill-dir /abs/path/to/skill --forever" \
+  --message "nohup cowork run --project /abs/path/to/my-project --skill-dir /abs/path/to/skill --forever --timeout 1h > /tmp/my-project-cowork.log 2>&1 & disown && echo 'Launched'" \
   --session isolated --announce --to <your-chat-id> --json | jq -r '.id')
 
 cowork set-crons --project ./my-project $ID1 $ID2
@@ -93,6 +93,39 @@ cowork run --project . --skill-dir <skill-dir> --only pm
 cowork run --project . --skill-dir <skill-dir> --only architect
 cowork run --project . --skill-dir <skill-dir> --only worker --task TASK-004
 ```
+
+## Inbox / Outbox — Human ↔ Orchestrator
+
+Drop comments or questions into the project inbox anytime. The orchestrator checks it at the start of every run (Phase 0) before doing anything else.
+
+**Add a comment** (one-way feedback — orchestrator reads, acts, archives):
+```bash
+cowork inbox add "Please review the docs/ directory for staleness before starting new tasks." \
+  --project ./my-project
+```
+
+**Add a question** (orchestrator will write an answer to outbox):
+```bash
+cowork inbox add "Should we prioritize streaming I/O over the async VM work?" \
+  --project ./my-project
+```
+
+**See what's waiting:**
+```bash
+cowork inbox list --project ./my-project
+cowork outbox list --project ./my-project   # orchestrator's responses to you
+```
+
+**Archive a response once you've read it:**
+```bash
+cowork outbox archive outbox/20260401-093000.md --project ./my-project
+```
+
+The orchestrator uses these commands internally:
+- `cowork inbox handle <path>` — marks a comment as handled, moves to `history/`
+- `cowork inbox respond <path> <answer>` — writes response to `outbox/`, moves original to `history/`
+
+Nothing is ever deleted — everything moves to `history/` with a timestamp prefix.
 
 ## Question / Answer Flow
 
@@ -158,8 +191,10 @@ cat my-project/state.json   # phase will be "complete", "working", "blocked", or
 | `--project` | `.` | Project root directory |
 | `--skill-dir` | — | Path to this skill (for agent scripts) |
 | `--workers` | `3` | Max parallel workers |
-| `--timeout` | `60m` | Worker session timeout |
-| `--forever` | off | Loop continuously until complete |
+| `--timeout` | none | Overall run deadline (e.g. `1h`). Cowork exits cleanly before this; use instead of shell `timeout` wrapper |
+| `--script-timeout` | `30m` | Max time for each orchestrator, PM, or architect session |
+| `--drain-window` | `15m` | Stop launching new cycles this long before the overall timeout deadline |
+| `--forever` | off | Loop continuously until complete or deadline |
 | `--pm-every` | `5` | PM pass every N orchestrator runs |
 | `--architect-every` | `10` | Architect pass every N orchestrator runs |
 | `--only` | — | Force one step: `orchestrator\|pm\|architect\|worker` |
@@ -179,9 +214,11 @@ my-project/
 ├── done.md              # Completed task log with summaries
 ├── questions/           # Open questions awaiting human answers
 ├── decisions/           # Submitted answers
+├── inbox/               # Human → orchestrator (comments, questions, feedback)
+├── outbox/              # Orchestrator → human (responses, answers)
 ├── updates/             # Human-readable run summaries (agent-written)
 ├── log/                 # Structured JSON run logs (binary-managed)
-└── history/             # Archived worker output files
+└── history/             # Archived task files, inbox/outbox items
 ```
 
 ## Agent Scripts
